@@ -87,6 +87,8 @@ export interface Args {
 	noUi?: boolean;
 	autoApprove?: boolean;
 	approvalMode?: "always-ask" | "write" | "yolo";
+	/** BenchLog: default `serial_open` to the fixture boot log (`BENCHLOG_SERIAL_FIXTURE=1`). */
+	fixture?: boolean;
 	messages: string[];
 	fileArgs: string[];
 	/** Extension-registered flags this parse recognized — name to value. */
@@ -350,6 +352,8 @@ export function parseArgs(inputArgs: string[], extensionFlags?: Map<string, { ty
 			result.noUi = true;
 		} else if (arg === "--auto-approve" || arg === "--yolo") {
 			result.autoApprove = true;
+		} else if (arg === "--fixture") {
+			result.fixture = true;
 		} else if (arg.startsWith("@")) {
 			let filePath = arg.slice(1);
 			if (filePath.startsWith('"') && filePath.endsWith('"') && filePath.length > 1) {

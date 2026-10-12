@@ -68,13 +68,33 @@ Tool approval policy is resolved in [`packages/coding-agent/src/tools/approval.t
 
 MCP support is [`packages/coding-agent/src/mcp/`](./packages/coding-agent/src/mcp/): per-project `.mcp.json`, stdio and HTTP transports, and [`tool-bridge.ts`](./packages/coding-agent/src/mcp/tool-bridge.ts), which turns MCP tools into custom tools on the same execution path. See [`docs/mcp-protocol-transports.md`](./docs/mcp-protocol-transports.md) and [`docs/mcp-runtime-lifecycle.md`](./docs/mcp-runtime-lifecycle.md).
 
-### UART tool plan
+### UART tools
 
-oh-my-pi does not ship a UART or serial tool. The BenchLog addition, not implemented in this import, is one tool on the existing tool path:
+The first cut is a project custom tool at [`.omp/tools/serial/`](./.omp/tools/serial/index.ts). omp discovers it when the working directory is this repo. Parameters are JSON Schema from the host zod builder. There is no XML toolcall path.
 
-- a module under `packages/coding-agent/src/tools/`, registered from `tools/index.ts`, or a custom-tool module as in `docs/custom-tools.md`
-- open a board serial port, capture firmware-log output, and keep that capture inside the resumable session
-- declare an approval policy through `tools/approval.ts` so opening the port and writing to the board stay gated
-- diagnose the captured log with the session plus the existing read and grep tools
+| Tool | Approval tier | What it does |
+| --- | --- | --- |
+| `serial_list` | `read` | Lists `fixture://firmware-boot`. Real host ports are not enumerated. |
+| `serial_open` | `read` | Opens the fixture boot log. Auto-approved in every omp approval mode. |
+| `serial_read` | `read` | Reads the next lines from that session. Auto-approved in every mode. |
+| `serial_write` | `exec` | Appends a payload and a fixture ack. Prompts unless the mode allows `exec`. |
 
-Baud rate, port naming, and the tool schema are not chosen yet.
+`serial_flash` and `serial_reset` are not implemented.
+
+The sample capture is [`fixtures/firmware-boot.txt`](./fixtures/firmware-boot.txt). No board is required.
+
+```sh
+bun scripts/benchlog-serial-demo.ts --fixture
+```
+
+`--fixture` on `omp` sets `BENCHLOG_SERIAL_FIXTURE=1` before the session starts. The same variable works without the flag. When it is set, `serial_open` with no port opens `fixture://firmware-boot`. Passing that port id opens the fixture even if the flag is off. A real device path such as `/dev/ttyUSB0` is refused.
+
+Approval is omp's existing resolver ([`docs/approval-mode.md`](./docs/approval-mode.md)), not a separate prompt:
+
+| Mode | `serial_list` / `serial_open` / `serial_read` | `serial_write` |
+| --- | --- | --- |
+| `always-ask` | allow | prompt |
+| `write` | allow | prompt (`exec` is outside the write-tier auto-approve) |
+| `yolo` (schema default) | allow | allow |
+
+`--approval-mode always-ask` is the way to see the write prompt. `--yolo` / `--auto-approve` allow the write. A user `tools.approval.serial_write: deny` still denies, including in `yolo`.

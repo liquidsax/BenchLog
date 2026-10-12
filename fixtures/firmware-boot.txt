@@ -1,0 +1,22 @@
+[    0.000] BenchLog fixture UART console
+[    0.004] board: benchlog-fixture
+[    0.011] reset cause: power-on
+[    0.020] clock: 64 MHz
+[    0.038] SRAM: 256 KiB
+[    0.070] flash: 8 MiB, jedec ef4017
+[    0.120] uart0: 115200 8N1 (fixture)
+[    0.180] gpio: strap pins 0x00
+[    0.240] mmc0: fixture card, firmware partition A
+[    0.310] reading firmware image fixture-boot-1
+[    0.460] image header ok, size 184320 bytes
+[    0.520] copying image to SRAM
+[    0.780] jump to firmware
+[    1.002] firmware fixture-boot-1 start
+[    1.040] watchdog armed
+[    1.110] sensor: temp probe missing
+[    1.111] WARN sensor: using onboard fallback
+[    1.200] radio: disabled in fixture
+[    1.260] net: link down
+[    1.400] services: logger, uart console
+[    1.450] boot: ready
+fixture prompt>

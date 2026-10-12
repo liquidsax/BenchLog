@@ -4,7 +4,15 @@
 
 BenchLog is not a CozeBasedCLI continuation. Banned patterns: XML toolcall, fake SQLite audit, non-resumable sessions, Coze lock-in.
 
-Upstream relationship, remotes, the modules this import keeps, and the UART tool plan are in [BENCHLOG.md](./BENCHLOG.md). `LICENSE` and `THIRD-PARTY-NOTICES.txt` stay as upstream shipped them.
+Upstream relationship, remotes, the modules this import keeps, and the UART fixture tools are in [BENCHLOG.md](./BENCHLOG.md). `LICENSE` and `THIRD-PARTY-NOTICES.txt` stay as upstream shipped them.
+
+Fixture demo, no board:
+
+```sh
+bun scripts/benchlog-serial-demo.ts --fixture
+```
+
+`omp --fixture` (or `BENCHLOG_SERIAL_FIXTURE=1`) makes `serial_open` use `fixtures/firmware-boot.txt`. `serial_list`, `serial_open`, and `serial_read` are read-tier. `serial_write` is exec-tier: it prompts in `always-ask` and `write`, and is auto-approved in `yolo`.
 
 The rest of this file is the upstream oh-my-pi README, kept intact.
 
