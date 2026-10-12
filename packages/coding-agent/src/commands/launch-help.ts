@@ -116,6 +116,9 @@ export const launchHelp = {
 			options: ["always-ask", "write", "yolo"],
 			description: "Override tools.approvalMode for this session (always-ask|write|yolo)",
 		}),
+		fixture: Flags.boolean({
+			description: "BenchLog: set BENCHLOG_SERIAL_FIXTURE=1 so serial_open defaults to the shipped boot log",
+		}),
 	},
 	examples: [
 		`# Interactive mode\n  ${APP_NAME}`,

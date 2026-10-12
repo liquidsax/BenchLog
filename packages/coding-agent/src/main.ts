@@ -1736,6 +1736,11 @@ export async function runRootCommand(
 		await logger.time("initTheme:initial", ensureTheme);
 
 		const parsedArgs = parsed;
+		if (parsedArgs.fixture) {
+			// BenchLog serial tools read this at execute time. `--fixture` only
+			// changes the default port for `serial_open`; it does not approve writes.
+			process.env.BENCHLOG_SERIAL_FIXTURE = "1";
+		}
 		try {
 			await logger.time("applyStartupCwd", applyStartupCwd, parsedArgs);
 		} catch (error: unknown) {
