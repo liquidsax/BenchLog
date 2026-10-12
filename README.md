@@ -1,3 +1,15 @@
+# BenchLog
+
+**板端串口观测与诊断 Agent.** This repository is based on [oh-my-pi](https://github.com/can1357/oh-my-pi) (MIT). It is a trimmed, specialized agent for board-side UART and firmware-log diagnosis, built on that tree.
+
+BenchLog is not a CozeBasedCLI continuation. Banned patterns: XML toolcall, fake SQLite audit, non-resumable sessions, Coze lock-in.
+
+Upstream relationship, remotes, the modules this import keeps, and the UART tool plan are in [BENCHLOG.md](./BENCHLOG.md). `LICENSE` and `THIRD-PARTY-NOTICES.txt` stay as upstream shipped them.
+
+The rest of this file is the upstream oh-my-pi README, kept intact.
+
+---
+
 <p align="center">
   <img src="https://github.com/can1357/oh-my-pi/blob/main/assets/hero.png?raw=true" alt="omp">
 </p>
