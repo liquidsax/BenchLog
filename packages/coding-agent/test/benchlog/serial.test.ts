@@ -48,16 +48,17 @@ describe("serial fixture capture", () => {
 		expect(second.content[0].text).not.toContain("BenchLog fixture UART console");
 	});
 
-	it("refuses a host device path and a missing fixture flag", async () => {
+	it("requires a port when the fixture flag is off, and reports a UART failure for a missing host device", async () => {
 		delete process.env[SERIAL_FIXTURE_ENV];
 		const missing = await call("serial_open");
 		expect(missing.isError).toBe(true);
 		expect(missing.content[0].text).toContain(FIXTURE_PORT_ID);
 
-		const host = await call("serial_open", { port: "/dev/ttyUSB0" });
+		const host = await call("serial_open", { port: "/dev/benchlog-no-such-uart" });
 		expect(host.isError).toBe(true);
-		expect(host.content[0].text).toContain("Real UART open is not in this cut");
+		expect(host.content[0].text).toContain("/dev/benchlog-no-such-uart");
 		expect(host.content[0].text).toContain("serial_flash");
+		expect(host.content[0].text.includes("not in this cut")).toBe(false);
 	});
 
 	it("opens fixture:// without the env flag", async () => {
@@ -65,6 +66,30 @@ describe("serial fixture capture", () => {
 		const opened = await call("serial_open", { port: FIXTURE_PORT_ID });
 		expect(opened.isError).toBeUndefined();
 		expect(opened.content[0].text).toContain("backend fixture");
+	});
+
+	it("probes the fixture log without consuming the read cursor", async () => {
+		delete process.env[SERIAL_FIXTURE_ENV];
+		const opened = await call("serial_open", { port: FIXTURE_PORT_ID });
+		expect(opened.isError).toBeUndefined();
+		const probed = await call("serial_probe", { sessionId: "ser-1" });
+		expect(probed.isError).toBeUndefined();
+		expect(probed.content[0].text).toContain("benchlog-fixture");
+		expect(probed.content[0].text).toContain("usb.vid");
+		const details = probed.details as {
+			backend: string;
+			unknowns: string[];
+			sniff: { kind: string };
+			sample: { board: string | null; firmware: string | null };
+		};
+		expect(details.backend).toBe("fixture");
+		expect(details.unknowns).toContain("usb.vid");
+		expect(details.unknowns).toContain("hostDevice");
+		expect(details.sniff.kind).toBe("ascii-boot");
+		expect(details.sample.board).toBe("benchlog-fixture");
+		expect(details.sample.firmware).toBe("fixture-boot-1");
+		const first = await call("serial_read", { sessionId: "ser-1", maxLines: 1 });
+		expect(first.content[0].text).toContain("BenchLog fixture UART console");
 	});
 });
 
@@ -97,7 +122,12 @@ describe("serial_write gating", () => {
 		expect(requiresApproval(tool("serial_open"), { port: FIXTURE_PORT_ID }, "always-ask").required).toBe(false);
 		expect(requiresApproval(tool("serial_read"), { sessionId: "ser-1" }, "write").required).toBe(false);
 		expect(requiresApproval(tool("serial_read"), { sessionId: "ser-1" }, "yolo").required).toBe(false);
+		expect(requiresApproval(tool("serial_probe"), { port: FIXTURE_PORT_ID }, "always-ask").required).toBe(false);
+		expect(requiresApproval(tool("serial_probe"), { port: "/dev/ttyUSB0" }, "always-ask").required).toBe(true);
+		expect(requiresApproval(tool("serial_probe"), { port: "/dev/ttyUSB0" }, "write").required).toBe(true);
+		expect(requiresApproval(tool("serial_probe"), { port: "/dev/ttyUSB0" }, "yolo").required).toBe(false);
 		expect(formatApprovalPrompt(tool("serial_write"), writeArgs)).toContain("data: help");
+		expect(formatApprovalPrompt(tool("serial_probe"), { port: "/dev/ttyUSB0" })).toContain("port: /dev/ttyUSB0");
 	});
 });
 

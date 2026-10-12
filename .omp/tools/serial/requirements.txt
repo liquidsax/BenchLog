@@ -1,0 +1,4 @@
+# Host UART for the BenchLog tools in this directory.
+# Python 3 is required. From the repo root:
+#   python3 -m pip install -r .omp/tools/serial/requirements.txt
+pyserial>=3.5
