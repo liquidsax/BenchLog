@@ -74,27 +74,35 @@ The first cut is a project custom tool at [`.omp/tools/serial/`](./.omp/tools/se
 
 | Tool | Approval tier | What it does |
 | --- | --- | --- |
-| `serial_list` | `read` | Lists `fixture://firmware-boot`. Real host ports are not enumerated. |
-| `serial_open` | `read` | Opens the fixture boot log. Auto-approved in every omp approval mode. |
-| `serial_read` | `read` | Reads the next lines from that session. Auto-approved in every mode. |
-| `serial_write` | `exec` | Appends a payload and a fixture ack. Prompts unless the mode allows `exec`. |
+| `serial_list` | `read` | Lists `fixture://firmware-boot` plus host UARTs pyserial can enumerate (`COM*`, `/dev/ttyACM*`, `/dev/ttyUSB*`, `cu.*`). Each port has `backend: "fixture"` or `"uart"`. |
+| `serial_open` | `read` | Opens the fixture boot log, or a host UART at 115200 8N1 (`baud` overridable). Returns `sessionId` and `backend`. |
+| `serial_read` | `read` | Reads the next lines from that session, fixture or UART. |
+| `serial_write` | `exec` | Fixture: appends a payload and an ack. UART: writes the bytes through pyserial. |
+| `serial_probe` | `read` for a fixture session or `fixture://` port; `exec` for a host UART | USB description, manufacturer, VID/PID, serial number (unknowns listed explicitly), baud hint, and a short sniff (AT, ASCII boot, ASCII, mixed, or binary). |
 
-`serial_flash` and `serial_reset` are not implemented.
+`serial_flash` and `serial_reset` are not implemented. RTT, SWD, and OpenOCD are out of scope. UART errors say so. An STM32 ST-LINK with no virtual COM port has no serial device for this cut to open.
 
-The sample capture is [`fixtures/firmware-boot.txt`](./fixtures/firmware-boot.txt). No board is required.
+The sample capture is [`fixtures/firmware-boot.txt`](./fixtures/firmware-boot.txt). No board is required for the fixture. Host UART needs Python 3 and pyserial. [`uart.py`](./.omp/tools/serial/uart.py) is the helper; the TypeScript hub keeps the session.
 
 ```sh
+python3 -m pip install -r .omp/tools/serial/requirements.txt
 bun scripts/benchlog-serial-demo.ts --fixture
 ```
 
-`--fixture` on `omp` sets `BENCHLOG_SERIAL_FIXTURE=1` before the session starts. The same variable works without the flag. When it is set, `serial_open` with no port opens `fixture://firmware-boot`. Passing that port id opens the fixture even if the flag is off. A real device path such as `/dev/ttyUSB0` is refused.
+If a host port exists, the same demo can open it (it does not write):
+
+```sh
+bun scripts/benchlog-serial-demo.ts --port /dev/ttyACM0
+```
+
+`--fixture` on `omp` sets `BENCHLOG_SERIAL_FIXTURE=1` before the session starts. The same variable works without the flag. When it is set, `serial_open` and `serial_probe` with no port use `fixture://firmware-boot`. Passing that port id opens the fixture even if the flag is off. A host path such as `/dev/ttyACM0` or `COM3` opens a real UART. The fixture path does not need Python.
 
 Approval is omp's existing resolver ([`docs/approval-mode.md`](./docs/approval-mode.md)), not a separate prompt:
 
-| Mode | `serial_list` / `serial_open` / `serial_read` | `serial_write` |
-| --- | --- | --- |
-| `always-ask` | allow | prompt |
-| `write` | allow | prompt (`exec` is outside the write-tier auto-approve) |
-| `yolo` (schema default) | allow | allow |
+| Mode | `serial_list` / `serial_open` / `serial_read` | `serial_probe` fixture | `serial_probe` host UART | `serial_write` |
+| --- | --- | --- | --- | --- |
+| `always-ask` | allow | allow | prompt | prompt |
+| `write` | allow | allow | prompt (`exec` is outside the write-tier auto-approve) | prompt |
+| `yolo` (schema default) | allow | allow | allow | allow |
 
-`--approval-mode always-ask` is the way to see the write prompt. `--yolo` / `--auto-approve` allow the write. A user `tools.approval.serial_write: deny` still denies, including in `yolo`.
+`--approval-mode always-ask` is the way to see the write or host-probe prompt. `--yolo` / `--auto-approve` allow them. A user `tools.approval.serial_write: deny` still denies, including in `yolo`. An unknown `serial_probe` session id fails closed to `exec`.
