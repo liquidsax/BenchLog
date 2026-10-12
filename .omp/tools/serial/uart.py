@@ -8,8 +8,9 @@ Requires Python 3 and pyserial:
 
     python3 -m pip install -r .omp/tools/serial/requirements.txt
 
-RTT, SWD, OpenOCD, flash, and reset are out of scope. This process only
-lists, opens, reads, writes, and sniffs host serial ports.
+This process only lists, opens, reads, writes, and sniffs host serial
+ports. RTT over SWD is a separate backend in the TypeScript hub. Flash and
+reset are not implemented.
 """
 
 from __future__ import annotations

@@ -10,11 +10,12 @@ Fixture demo, no board:
 
 ```sh
 bun scripts/benchlog-serial-demo.ts --fixture
+bun scripts/benchlog-serial-demo.ts --rtt
 ```
 
-`omp --fixture` (or `BENCHLOG_SERIAL_FIXTURE=1`) makes `serial_open` use `fixtures/firmware-boot.txt`. `serial_list`, `serial_open`, and `serial_read` are read-tier. `serial_write` is exec-tier: it prompts in `always-ask` and `write`, and is auto-approved in `yolo`. `serial_probe` is read-tier for the fixture and exec-tier for a host UART.
+`omp --fixture` (or `BENCHLOG_SERIAL_FIXTURE=1`) makes `serial_open` use `fixtures/firmware-boot.txt`. `bun scripts/benchlog-serial-demo.ts --rtt` reads `fixture://rtt-sample` with no board and no OpenOCD. `serial_list` and `serial_read` are read-tier. `serial_open` is read-tier for a fixture or host UART, and exec-tier for `rtt://` (it connects OpenOCD). `serial_write` is exec-tier. `serial_probe` is read-tier for either fixture and exec-tier for a host UART or `rtt://`.
 
-Host UART needs Python 3 and pyserial (`python3 -m pip install -r .omp/tools/serial/requirements.txt`). If a port exists, `bun scripts/benchlog-serial-demo.ts --port /dev/ttyACM0` opens it. See [BENCHLOG.md](./BENCHLOG.md).
+Host UART needs Python 3 and pyserial (`python3 -m pip install -r .omp/tools/serial/requirements.txt`). Hardware RTT needs OpenOCD (`apt`, `dnf`, `pacman`, or `brew install openocd`) and an ST-LINK; a ST-LINK with no virtual COM port is not a UART. See [BENCHLOG.md](./BENCHLOG.md).
 
 The rest of this file is the upstream oh-my-pi README, kept intact.
 
