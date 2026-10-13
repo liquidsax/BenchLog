@@ -11,6 +11,67 @@ This repository is not a CozeBasedCLI continuation. These patterns are banned:
 - non-resumable sessions
 - Coze lock-in
 
+## Product package
+
+The publishable unit is this repository's root `package.json` (`name`: `benchlog`, bin: `benchlog`). `bun install` / `npm install` at the root installs `@oh-my-pi/pi-coding-agent` and does not install the mirrored `packages/*` workspace. That workspace manifest is preserved as `package.omp-workspace.json` (lockfile: `bun.omp-workspace.lock`) so it can be restored by hand. It is not what a product install runs.
+
+```sh
+git clone https://github.com/liquidsax/BenchLog.git
+cd BenchLog
+bun install
+bun run benchlog
+```
+
+Registry install, once published:
+
+```sh
+bun install -g benchlog
+npm install -g benchlog
+```
+
+`benchlog` resolves `@oh-my-pi/pi-coding-agent`'s `src/cli.ts` and runs it with Bun. A global install may also link an `omp` bin from that dependency. Use `benchlog`: it applies `--fixture` and loads the serial tools. Plain `omp` is the harness without those BenchLog wrappers.
+
+### Cut from the default install
+
+| Stack | Why it is absent |
+| --- | --- |
+| `@huggingface/transformers`, `@huggingface/tokenizers` | Local embedding / tiny-model weights. Not used for serial diagnosis. |
+| `sherpa-onnx` and `sherpa-onnx-*` | Speech runtime. Not used. |
+| `onnxruntime-node`, `onnxruntime-web`, `onnxruntime-common`, `fastembed` | ONNX / embedding natives pulled by the stacks above. |
+| `lucide-react`, `react`, `react-dom` | Icon and React UI for the omp-stats dashboard. The coding-agent TUI does not import them. `benchlog stats` still uses the stats server entry; rebuilding that dashboard UI from source needs the real packages. |
+
+When this repo is the install root, `overrides` point those names at `vendor/omitted-optional` (an empty package that throws if imported). `scripts/prune-heavy-optionals.js` runs on `postinstall` and deletes those real trees if a parent install did not apply overrides. It leaves a package in place when the top-level project, or any unrelated installed package, already depends on it, so installing BenchLog into an app does not delete that app's `react`.
+
+Still installed, and why:
+
+- `@oh-my-pi/pi-natives` plus one host leaf (`@oh-my-pi/pi-natives-linux-x64` on linux x64). The x64 leaf contains both baseline and modern `.node` builds; the loader chooses at runtime. Dropping one without changing the loader can make the agent fail on the other ISA, so both stay.
+- `puppeteer-core` and `axe-core`, because the published coding-agent depends on them. BenchLog does not drive the browser tool. They are not optional in the harness, and replacing them would mean forking that package.
+- OpenTelemetry API and OTLP exporter packages. They are ordinary harness dependencies and small next to `pi-natives`.
+
+`bunfig.toml` does **not** set `optional = false`. That would also skip the `pi-natives` platform leaf. It does exempt the pinned `@oh-my-pi/*` packages from the 3-day minimum release age, because `18.10.1` is the harness this package depends on and a fresh publish can be younger than that window.
+
+Check the footprint (clean temp install, current OS/CPU):
+
+```sh
+bun scripts/check-install-size.ts
+```
+
+The budget is 500 MiB (`500 * 1024 * 1024` bytes) of `node_modules`. linux x64 is the target. The script fails if the tree is over budget, if a real heavy package listed above is present, or if the `pi-natives` host leaf is missing. `--self` measures the checkout you already installed. CI runs the clean install (`.github/workflows/benchlog-product.yml`).
+
+### Models and NVIDIA NIM
+
+Model setup is the harness. For NVIDIA NIM export `NVIDIA_API_KEY` (NGC personal key). Provider id `nvidia` calls `https://integrate.api.nvidia.com/v1`. See [docs/providers.md](./docs/providers.md) for other provider environment variables. BenchLog does not add a second model catalog.
+
+### How serial tools load
+
+The tools remain [`.omp/tools/serial/`](./.omp/tools/serial/index.ts). omp discovers `<cwd>/.omp/tools/serial/index.ts` when that file exists, which is this repository.
+
+From any other working directory, `benchlog` passes `--extension <package>/benchlog-ext`. That directory's `tools/serial/index.ts` re-exports the same factory. Fixture logs are resolved from the real module URL: `fixtures/firmware-boot.txt` and `.omp/tools/serial/fixtures/rtt-sample.txt`.
+
+`benchlog --fixture` sets `BENCHLOG_SERIAL_FIXTURE=1` and does not pass `--fixture` through. Published `@oh-my-pi/pi-coding-agent@18.10.1` does not define that flag. The mirrored tree still has a small local `--fixture` addition under `packages/coding-agent/` from earlier BenchLog work. The product CLI does not depend on it, and this package does not publish that fork.
+
+Host UART still needs Python 3 and pyserial. Hardware RTT still needs OpenOCD and an ST-LINK. See the tool table below.
+
 ## Import
 
 BenchLog was an empty GitHub repository with a one-line placeholder commit. That placeholder was replaced by a push of oh-my-pi's default branch (`main`), so the original commits and their ids stay in this history. The imported tip was `22a6a8230656cc87b6e5903a3a366965da35eba9`.

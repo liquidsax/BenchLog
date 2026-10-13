@@ -15,13 +15,13 @@
  *
  *   bun scripts/benchlog-serial-demo.ts --rtt
  *
- * `--fixture` sets BENCHLOG_SERIAL_FIXTURE=1, which is what `omp --fixture`
+ * `--fixture` sets BENCHLOG_SERIAL_FIXTURE=1, which is what `benchlog --fixture`
  * does before a session starts. The fixture run lists, opens, probes, reads,
  * and writes the shipped boot log, and prints omp's approval decision for
  * serial_write and serial_probe. `--rtt` does the same for fixture://rtt-sample.
  */
 import * as zod from "@oh-my-pi/omptype/zod";
-import { requiresApproval } from "../packages/coding-agent/src/tools/approval.ts";
+import { requiresApproval } from "@oh-my-pi/pi-coding-agent/tools/approval";
 import {
 	FIXTURE_PORT_ID,
 	RTT_FIXTURE_PORT_ID,
