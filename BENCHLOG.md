@@ -74,19 +74,20 @@ The first cut is a project custom tool at [`.omp/tools/serial/`](./.omp/tools/se
 
 | Tool | Approval tier | What it does |
 | --- | --- | --- |
-| `serial_list` | `read` | Lists `fixture://firmware-boot` plus host UARTs pyserial can enumerate (`COM*`, `/dev/ttyACM*`, `/dev/ttyUSB*`, `cu.*`). Each port has `backend: "fixture"` or `"uart"`. |
-| `serial_open` | `read` | Opens the fixture boot log, or a host UART at 115200 8N1 (`baud` overridable). Returns `sessionId` and `backend`. |
-| `serial_read` | `read` | Reads the next lines from that session, fixture or UART. |
-| `serial_write` | `exec` | Fixture: appends a payload and an ack. UART: writes the bytes through pyserial. |
-| `serial_probe` | `read` for a fixture session or `fixture://` port; `exec` for a host UART | USB description, manufacturer, VID/PID, serial number (unknowns listed explicitly), baud hint, and a short sniff (AT, ASCII boot, ASCII, mixed, or binary). |
+| `serial_list` | `read` | Lists `fixture://firmware-boot`, `fixture://rtt-sample`, host UARTs pyserial can enumerate (`COM*`, `/dev/ttyACM*`, `/dev/ttyUSB*`, `cu.*`), and `rtt://stlink-N` when OpenOCD and an ST-LINK are both visible. Backends are `"fixture"`, `"uart"`, and `"rtt"`. |
+| `serial_open` | `read` for a fixture or host UART; `exec` for `rtt://` | Opens the UART fixture, the RTT fixture, a host UART at 115200 8N1 (`baud` overridable), or an OpenOCD RTT session. Returns `sessionId` and `backend`. |
+| `serial_read` | `read` | Reads the next lines from that session, including an already open RTT channel. |
+| `serial_write` | `exec` | Fixture: appends a payload and an ack. UART: writes through pyserial. RTT: writes the OpenOCD RTT TCP channel. |
+| `serial_probe` | `read` for either fixture; `exec` for a host UART or `rtt://` | UART: USB identity, unknowns, baud hint, sniff. RTT: chip, adapter, RTT buffer names and sizes, unknowns. |
 
-`serial_flash` and `serial_reset` are not implemented. RTT, SWD, and OpenOCD are out of scope. UART errors say so. An STM32 ST-LINK with no virtual COM port has no serial device for this cut to open.
+`serial_flash` and `serial_reset` are not implemented. An STM32 ST-LINK with no virtual COM port is not a UART (`No VCP:`). RTT is the path that uses that adapter: OpenOCD over SWD, not pyserial. A missing `openocd` binary is `OpenOCD missing:`. A search that does not find the SEGGER block is `No RTT control block:`.
 
-The sample capture is [`fixtures/firmware-boot.txt`](./fixtures/firmware-boot.txt). No board is required for the fixture. Host UART needs Python 3 and pyserial. [`uart.py`](./.omp/tools/serial/uart.py) is the helper; the TypeScript hub keeps the session.
+The UART sample is [`fixtures/firmware-boot.txt`](./fixtures/firmware-boot.txt). The RTT sample is [`.omp/tools/serial/fixtures/rtt-sample.txt`](./.omp/tools/serial/fixtures/rtt-sample.txt). Neither needs a board. Host UART needs Python 3 and pyserial. [`uart.py`](./.omp/tools/serial/uart.py) is the helper; the TypeScript hub keeps the session. Hardware RTT needs OpenOCD (`apt`, `dnf`, `pacman`, or `brew install openocd`) and an ST-LINK. The command sequence is documented as a hypothesis in [`.omp/tools/serial/README.md`](./.omp/tools/serial/README.md).
 
 ```sh
 python3 -m pip install -r .omp/tools/serial/requirements.txt
 bun scripts/benchlog-serial-demo.ts --fixture
+bun scripts/benchlog-serial-demo.ts --rtt
 ```
 
 If a host port exists, the same demo can open it (it does not write):
@@ -95,14 +96,14 @@ If a host port exists, the same demo can open it (it does not write):
 bun scripts/benchlog-serial-demo.ts --port /dev/ttyACM0
 ```
 
-`--fixture` on `omp` sets `BENCHLOG_SERIAL_FIXTURE=1` before the session starts. The same variable works without the flag. When it is set, `serial_open` and `serial_probe` with no port use `fixture://firmware-boot`. Passing that port id opens the fixture even if the flag is off. A host path such as `/dev/ttyACM0` or `COM3` opens a real UART. The fixture path does not need Python.
+`--fixture` on `omp` sets `BENCHLOG_SERIAL_FIXTURE=1` before the session starts. The same variable works without the flag. When it is set, `serial_open` and `serial_probe` with no port use `fixture://firmware-boot`. Passing that port id opens the UART fixture even if the flag is off. `fixture://rtt-sample` opens the RTT sample whether or not the flag is set; it does not replace the UART default. A host path such as `/dev/ttyACM0` or `COM3` opens a real UART. `rtt://stlink-0` spawns OpenOCD when an ST-LINK was listed. The fixture paths do not need Python or OpenOCD.
 
 Approval is omp's existing resolver ([`docs/approval-mode.md`](./docs/approval-mode.md)), not a separate prompt:
 
-| Mode | `serial_list` / `serial_open` / `serial_read` | `serial_probe` fixture | `serial_probe` host UART | `serial_write` |
+| Mode | `serial_list` / `serial_read` / fixture or UART `serial_open` | fixture `serial_probe` | host UART `serial_probe`, `rtt://` open, `rtt://` probe | `serial_write` |
 | --- | --- | --- | --- | --- |
 | `always-ask` | allow | allow | prompt | prompt |
 | `write` | allow | allow | prompt (`exec` is outside the write-tier auto-approve) | prompt |
 | `yolo` (schema default) | allow | allow | allow | allow |
 
-`--approval-mode always-ask` is the way to see the write or host-probe prompt. `--yolo` / `--auto-approve` allow them. A user `tools.approval.serial_write: deny` still denies, including in `yolo`. An unknown `serial_probe` session id fails closed to `exec`.
+`--approval-mode always-ask` is the way to see the write, host-probe, or RTT-connect prompt. `--yolo` / `--auto-approve` allow them. A user `tools.approval.serial_write: deny` still denies, including in `yolo`. An unknown `serial_probe` session id fails closed to `exec`.

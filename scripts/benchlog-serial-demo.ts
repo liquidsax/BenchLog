@@ -11,14 +11,23 @@
  *   bun scripts/benchlog-serial-demo.ts --port /dev/ttyACM0
  *   bun scripts/benchlog-serial-demo.ts --port COM3 --baud 115200
  *
+ * Fixture RTT, no board, no OpenOCD, no model:
+ *
+ *   bun scripts/benchlog-serial-demo.ts --rtt
+ *
  * `--fixture` sets BENCHLOG_SERIAL_FIXTURE=1, which is what `omp --fixture`
  * does before a session starts. The fixture run lists, opens, probes, reads,
  * and writes the shipped boot log, and prints omp's approval decision for
- * serial_write and serial_probe.
+ * serial_write and serial_probe. `--rtt` does the same for fixture://rtt-sample.
  */
 import * as zod from "@oh-my-pi/omptype/zod";
 import { requiresApproval } from "../packages/coding-agent/src/tools/approval.ts";
-import { FIXTURE_PORT_ID, SERIAL_FIXTURE_ENV, resetSerialHub } from "../.omp/tools/serial/backend.ts";
+import {
+	FIXTURE_PORT_ID,
+	RTT_FIXTURE_PORT_ID,
+	SERIAL_FIXTURE_ENV,
+	resetSerialHub,
+} from "../.omp/tools/serial/backend.ts";
 import factory from "../.omp/tools/serial/index.ts";
 
 function flagValue(flag: string): string | undefined {
@@ -30,6 +39,7 @@ function flagValue(flag: string): string | undefined {
 }
 
 const fixtureFlag = process.argv.includes("--fixture");
+const rttFlag = process.argv.includes("--rtt");
 const hostPort = flagValue("--port");
 const baudArg = flagValue("--baud");
 const baud = baudArg === undefined ? undefined : Number(baudArg);
@@ -37,7 +47,7 @@ if (baudArg !== undefined && (!Number.isInteger(baud) || baud < 50)) {
 	throw new Error("--baud must be an integer >= 50");
 }
 
-if (hostPort) {
+if (hostPort || rttFlag) {
 	delete process.env[SERIAL_FIXTURE_ENV];
 } else if (fixtureFlag || process.env[SERIAL_FIXTURE_ENV] === undefined) {
 	process.env[SERIAL_FIXTURE_ENV] = "1";
@@ -81,6 +91,37 @@ if (hostPort) {
 	console.log(await (await call("serial_probe", { sessionId })).text);
 	console.log("");
 	console.log((await call("serial_read", { sessionId, maxLines: 20 })).text);
+} else if (rttFlag) {
+	const port = RTT_FIXTURE_PORT_ID;
+	const writeArgs = { sessionId: "ser-1", data: "help\n" };
+	const openTool = byName.get("serial_open");
+	if (!openTool) throw new Error("missing serial_open");
+	console.log(`BenchLog RTT fixture demo (${port})`);
+	console.log("No ST-LINK and no OpenOCD. This is the sample capture.");
+	console.log("");
+	console.log((await call("serial_list")).text);
+	console.log("");
+	console.log((await call("serial_open", { port })).text);
+	console.log("");
+	console.log((await call("serial_probe", { sessionId: "ser-1" })).text);
+	console.log("");
+	console.log((await call("serial_read", { sessionId: "ser-1", maxLines: 8 })).text);
+	console.log("");
+	console.log("approval (omp resolveApproval):");
+	for (const mode of ["always-ask", "write", "yolo"] as const) {
+		const writeDecision = requiresApproval(writeTool, writeArgs, mode);
+		const openFixture = requiresApproval(openTool, { port }, mode);
+		const openHardware = requiresApproval(openTool, { port: "rtt://stlink-0" }, mode);
+		const probeFixture = requiresApproval(probeTool, { port }, mode);
+		const probeHardware = requiresApproval(probeTool, { port: "rtt://stlink-0" }, mode);
+		console.log(
+			`  ${mode}: open fixture ${openFixture.required ? "prompt" : "allow"}, open rtt://stlink-0 ${openHardware.required ? "prompt" : "allow"}, write ${writeDecision.required ? "prompt" : "allow"}, probe fixture ${probeFixture.required ? "prompt" : "allow"}, probe rtt://stlink-0 ${probeHardware.required ? "prompt" : "allow"}`,
+		);
+	}
+	console.log("");
+	console.log((await call("serial_write", writeArgs)).text);
+	console.log("");
+	console.log((await call("serial_read", { sessionId: "ser-1", maxLines: 200 })).text);
 } else {
 	const writeArgs = { sessionId: "ser-1", data: "help\n" };
 	console.log(`BenchLog serial fixture demo (${FIXTURE_PORT_ID})`);
@@ -110,9 +151,13 @@ if (hostPort) {
 }
 
 console.log("");
-console.log("Real UART, when a port exists:");
+console.log("Real UART, when a virtual COM port exists:");
 console.log("  python3 -m pip install -r .omp/tools/serial/requirements.txt");
 console.log("  bun scripts/benchlog-serial-demo.ts --port /dev/ttyACM0");
-console.log("serial_list then shows that port with backend uart. ST-LINK without a virtual COM port will not appear.");
-console.log("RTT, SWD, OpenOCD, flash, and reset are not in this cut.");
+console.log("Fixture RTT, no board:");
+console.log("  bun scripts/benchlog-serial-demo.ts --rtt");
+console.log(
+	"Real ST-LINK RTT needs OpenOCD (apt/dnf/pacman/brew install openocd), then serial_open port rtt://stlink-0.",
+);
+console.log("serial_flash and serial_reset are not implemented.");
 resetSerialHub();

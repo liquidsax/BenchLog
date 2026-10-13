@@ -2,10 +2,34 @@
  * BenchLog serial sessions.
  *
  * The fixture backend replays `fixtures/firmware-boot.txt`. Host paths go
- * through `uart.py` (Python 3 + pyserial). `serial_flash` and `serial_reset`
- * are not implemented; RTT, SWD, and OpenOCD are out of scope.
+ * through `uart.py` (Python 3 + pyserial). `fixture://rtt-sample` and
+ * `rtt://` ports are the RTT backend (`rtt.ts`, `openocd.ts`).
+ * `serial_flash` and `serial_reset` are not implemented.
  */
+import { type OpenOcdLink, openRttLink } from "./openocd.ts";
+import {
+	type RttIdentity,
+	RTT_FIXTURE_PORT_ID,
+	RTT_OPENOCD_PORT_ID,
+	detectStlinkAdapters,
+	formatNoVcp,
+	formatOpenOcdMissing,
+	isRttFixturePort,
+	isRttHardwarePort,
+	isRttPort,
+	listRttPorts,
+	loadRttFixtureText,
+	parseRttFixture,
+	resolveOpenOcd,
+	rttChannelFromEnv,
+	rttInterfaceFromEnv,
+	rttSearchFromEnv,
+	rttTargetFromEnv,
+	rttUnknowns,
+} from "./rtt.ts";
 import { type BridgeFailure, type HostPortMeta, type UartRuntime, UartBridge } from "./uart-bridge.ts";
+
+export { RTT_FIXTURE_PORT_ID, isRttFixturePort, isRttHardwarePort };
 
 export const FIXTURE_PORT_ID = "fixture://firmware-boot";
 export const SERIAL_FIXTURE_ENV = "BENCHLOG_SERIAL_FIXTURE";
@@ -20,9 +44,8 @@ const UART_READ_TIMEOUT_MS = 400;
 const UART_PROBE_SNIFF_MS = 500;
 
 const BUNDLED_FIXTURE_URL = new URL("../../../fixtures/firmware-boot.txt", import.meta.url);
-
-const UART_SCOPE_NOTE =
-	"This cut is host UART via pyserial only. RTT, SWD, OpenOCD, flash, and reset are not implemented (serial_flash and serial_reset). An STM32 ST-LINK with no virtual COM port does not appear as a serial device.";
+const RTT_READ_TIMEOUT_MS = 400;
+const RTT_PROBE_SNIFF_MS = 200;
 
 export interface UsbIdentity {
 	description: string | null;
@@ -38,7 +61,7 @@ export interface UsbIdentity {
 
 export interface ListedPort {
 	id: string;
-	backend: "fixture" | "uart";
+	backend: "fixture" | "uart" | "rtt";
 	description: string;
 	usb?: UsbIdentity;
 }
@@ -46,7 +69,7 @@ export interface ListedPort {
 export interface OpenedSession {
 	sessionId: string;
 	port: string;
-	backend: "fixture" | "uart";
+	backend: "fixture" | "uart" | "rtt";
 	baud?: number;
 	lineCount?: number;
 }
@@ -54,7 +77,7 @@ export interface OpenedSession {
 export interface ReadChunk {
 	sessionId: string;
 	port: string;
-	backend: "fixture" | "uart";
+	backend: "fixture" | "uart" | "rtt";
 	text: string;
 	lineCount: number;
 	offset: number;
@@ -64,7 +87,7 @@ export interface ReadChunk {
 export interface WriteAck {
 	sessionId: string;
 	port: string;
-	backend: "fixture" | "uart";
+	backend: "fixture" | "uart" | "rtt";
 	bytes: number;
 	echoed?: string;
 }
@@ -91,7 +114,7 @@ export interface Sniff {
 }
 
 export interface ProbeReport {
-	backend: "fixture" | "uart";
+	backend: "fixture" | "uart" | "rtt";
 	port: string;
 	sessionId: string | null;
 	baud: number | null;
@@ -102,6 +125,7 @@ export interface ProbeReport {
 	sniffDisposition: "fixture-sample" | "buffered-for-serial-read" | "temporary-open-consumed";
 	sample: FixtureSample | null;
 	runtime: UartRuntime | null;
+	rtt: RttIdentity | null;
 	notes: string[];
 }
 
@@ -125,7 +149,20 @@ interface UartSession {
 	offset: number;
 }
 
-type Session = FixtureSession | UartSession;
+interface RttSession {
+	kind: "rtt";
+	hardware: boolean;
+	id: string;
+	port: string;
+	lines: string[];
+	offset: number;
+	pendingLines: string[];
+	link?: OpenOcdLink;
+	info: RttIdentity;
+	usb: UsbIdentity;
+}
+
+type Session = FixtureSession | UartSession | RttSession;
 
 const AT_LINE = /(^|[\r\n])\s*AT(\+[A-Z0-9_]+)?(\s|$|[\r\n]|=|\?)/i;
 const AT_RESP = /(^|[\r\n])(OK|ERROR|BUSY)\s*($|[\r\n])/;
@@ -268,6 +305,36 @@ function describeHostPort(meta: HostPortMeta): string {
 	return [title, id, serialNumber].filter(part => part !== "").join(" ");
 }
 
+function rttFixtureUsb(): UsbIdentity {
+	return {
+		description: "BenchLog fixture RTT console (no host adapter)",
+		manufacturer: "BenchLog",
+		product: "benchlog-rtt-fixture",
+		vid: null,
+		pid: null,
+		serialNumber: null,
+		hwid: RTT_FIXTURE_PORT_ID,
+		location: null,
+		interface: "rtt0",
+	};
+}
+
+function rttHardwareUsb(partial: UsbIdentity | null): UsbIdentity {
+	return (
+		partial ?? {
+			description: null,
+			manufacturer: null,
+			product: null,
+			vid: null,
+			pid: null,
+			serialNumber: null,
+			hwid: null,
+			location: null,
+			interface: "swd",
+		}
+	);
+}
+
 function fixtureUsb(): UsbIdentity {
 	return {
 		description: "BenchLog fixture UART console (no host device)",
@@ -283,11 +350,7 @@ function fixtureUsb(): UsbIdentity {
 }
 
 function uartFailure(port: string, detail: string): string {
-	const trimmed = detail.trim().replace(/\.+$/, "");
-	const permission = /permission denied|access is denied|errno 13/i.test(trimmed)
-		? " On Linux the user may need to be in the dialout group."
-		: "";
-	return `UART ${JSON.stringify(port)}: ${trimmed}.${permission} ${UART_SCOPE_NOTE}`;
+	return formatNoVcp(port, detail);
 }
 
 function bridgeFailure(port: string, failed: BridgeFailure): SerialResult<never> {
@@ -299,7 +362,7 @@ function bridgeFailure(port: string, failed: BridgeFailure): SerialResult<never>
 				port,
 				usb,
 				unknowns: usbUnknowns(usb),
-				notes: [UART_SCOPE_NOTE],
+				notes: ["No VCP: the host UART was not opened. RTT is a separate backend."],
 			}
 		: undefined;
 	return { ok: false, error: uartFailure(port, failed.error), ...(details ? { details } : {}) };
@@ -316,24 +379,44 @@ export class SerialHub {
 	#bridge: UartBridge | undefined;
 	#disposed = false;
 	readonly #fixtureText: string | undefined;
+	readonly #rttFixtureText: string | undefined;
 
-	constructor(fixtureText?: string) {
+	constructor(fixtureText?: string, rttFixtureText?: string) {
 		this.#fixtureText = fixtureText;
+		this.#rttFixtureText = rttFixtureText;
 	}
 
 	dispose(): void {
 		if (this.#disposed) return;
 		this.#disposed = true;
+		for (const session of this.#sessions.values()) {
+			if (session.kind === "rtt") session.link?.close();
+		}
 		this.#bridge?.dispose();
 		this.#bridge = undefined;
 		this.#sessions.clear();
 	}
 
-	sessionBackend(sessionId: string): "fixture" | "uart" | undefined {
+	sessionBackend(sessionId: string): "fixture" | "uart" | "rtt" | undefined {
 		return this.#sessions.get(sessionId.trim())?.kind;
 	}
 
-	async list(): Promise<{ ports: ListedPort[]; fixtureDefault: boolean; uartError?: string; skipped?: number }> {
+	/** `false` for a fixture UART or fixture RTT session. Unknown sessions are `undefined` (fail closed). */
+	sessionTouchesHardware(sessionId: string): boolean | undefined {
+		const session = this.#sessions.get(sessionId.trim());
+		if (!session) return undefined;
+		if (session.kind === "fixture") return false;
+		if (session.kind === "uart") return true;
+		return session.hardware;
+	}
+
+	async list(): Promise<{
+		ports: ListedPort[];
+		fixtureDefault: boolean;
+		uartError?: string;
+		skipped?: number;
+		rttNote: string;
+	}> {
 		const ports: ListedPort[] = [
 			{
 				id: FIXTURE_PORT_ID,
@@ -341,9 +424,24 @@ export class SerialHub {
 				description: "Sample firmware boot log shipped at fixtures/firmware-boot.txt",
 			},
 		];
+		let rttNote = "";
+		try {
+			const rtt = await listRttPorts();
+			rttNote = rtt.note;
+			for (const port of rtt.ports) {
+				ports.push({
+					id: port.id,
+					backend: "rtt",
+					description: port.description,
+					...(port.usb ? { usb: port.usb } : {}),
+				});
+			}
+		} catch (error) {
+			rttNote = error instanceof Error ? error.message : String(error);
+		}
 		const listed = await this.#hosts().list();
 		if (!listed.ok) {
-			return { fixtureDefault: envRequestsFixture(), ports, uartError: listed.error };
+			return { fixtureDefault: envRequestsFixture(), ports, uartError: listed.error, rttNote };
 		}
 		for (const meta of listed.ports) {
 			ports.push({
@@ -353,13 +451,20 @@ export class SerialHub {
 				usb: usbFromMeta(meta),
 			});
 		}
-		return { fixtureDefault: envRequestsFixture(), ports, skipped: listed.skipped };
+		return { fixtureDefault: envRequestsFixture(), ports, skipped: listed.skipped, rttNote };
 	}
 
-	async open(input: { port?: string; fixture?: boolean; baud?: number }): Promise<SerialResult<OpenedSession>> {
+	async open(input: {
+		port?: string;
+		fixture?: boolean;
+		baud?: number;
+		target?: string;
+		rttSearch?: string;
+	}): Promise<SerialResult<OpenedSession>> {
+		const requested = input.port?.trim() ?? "";
+		if (isRttPort(requested)) return this.#openRtt(requested, input.target, input.rttSearch);
 		const baud = normalizeBaud(input.baud);
 		if (!baud.ok) return baud;
-		const requested = input.port?.trim() ?? "";
 		if (requested === "" || isFixturePort(requested)) {
 			return this.#openFixture(requested, input.fixture);
 		}
@@ -372,6 +477,7 @@ export class SerialHub {
 		const maxLines = normalizeMaxLines(input.maxLines);
 		if (!maxLines.ok) return maxLines;
 		if (session.value.kind === "fixture") return this.#readFixture(session.value, maxLines.value);
+		if (session.value.kind === "rtt") return this.#readRtt(session.value, maxLines.value);
 		return this.#readUart(session.value, maxLines.value);
 	}
 
@@ -385,25 +491,34 @@ export class SerialHub {
 			return { ok: false, error: `serial_write data exceeds ${MAX_WRITE_CHARS} characters.` };
 		}
 		if (session.value.kind === "fixture") return this.#writeFixture(session.value, input.data);
+		if (session.value.kind === "rtt") return this.#writeRtt(session.value, input.data);
 		return this.#writeUart(session.value, input.data);
 	}
 
-	async probe(input: { sessionId?: string; port?: string; baud?: number }): Promise<SerialResult<ProbeReport>> {
+	async probe(input: {
+		sessionId?: string;
+		port?: string;
+		baud?: number;
+		target?: string;
+		rttSearch?: string;
+	}): Promise<SerialResult<ProbeReport>> {
 		const sessionId = input.sessionId?.trim() ?? "";
 		const port = input.port?.trim() ?? "";
 		if (sessionId !== "") {
 			const session = this.#require(sessionId);
 			if (!session.ok) return session;
 			if (session.value.kind === "fixture") return this.#probeFixture(session.value);
+			if (session.value.kind === "rtt") return this.#probeRttSession(session.value);
 			return this.#probeUartSession(session.value);
 		}
 		if (port === "") {
 			if (envRequestsFixture()) return this.#probeFixture(undefined);
 			return {
 				ok: false,
-				error: `serial_probe needs a sessionId or a port. Pass ${FIXTURE_PORT_ID} or a host path such as /dev/ttyACM0.`,
+				error: `serial_probe needs a sessionId or a port. Pass ${FIXTURE_PORT_ID}, ${RTT_FIXTURE_PORT_ID}, or a host path such as /dev/ttyACM0.`,
 			};
 		}
+		if (isRttPort(port)) return this.#probeRttPort(port, input.target, input.rttSearch);
 		if (isFixturePort(port)) {
 			const existing = [...this.#sessions.values()].find(session => session.kind === "fixture");
 			return this.#probeFixture(existing?.kind === "fixture" ? existing : undefined);
@@ -576,6 +691,7 @@ export class SerialHub {
 				sniffDisposition: "fixture-sample",
 				sample,
 				runtime: null,
+				rtt: null,
 				notes: ["Sample metadata parsed from the fixture capture. No host serial device was opened."],
 			},
 		};
@@ -642,8 +758,331 @@ export class SerialHub {
 			sniffDisposition: disposition,
 			sample: null,
 			runtime: probed.runtime,
+			rtt: null,
 			notes,
 		};
+	}
+
+	async #openRtt(
+		port: string,
+		target: string | undefined,
+		rttSearch: string | undefined,
+	): Promise<SerialResult<OpenedSession>> {
+		if (isRttFixturePort(port)) return this.#openRttFixture();
+		if (!isRttHardwarePort(port)) {
+			return {
+				ok: false,
+				error: `RTT port ${JSON.stringify(port)} is not ${RTT_FIXTURE_PORT_ID}, rtt://stlink-N, or ${RTT_OPENOCD_PORT_ID}.`,
+			};
+		}
+		return this.#openRttHardware(port, target, rttSearch);
+	}
+
+	async #openRttFixture(): Promise<SerialResult<OpenedSession>> {
+		const existing = [...this.#sessions.values()].find(session => session.kind === "rtt" && !session.hardware);
+		if (existing?.kind === "rtt") return { ok: true, value: this.#opened(existing) };
+		let text: string;
+		try {
+			text = await loadRttFixtureText(this.#rttFixtureText);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			return { ok: false, error: `RTT fixture log is unreadable: ${message}` };
+		}
+		const parsed = parseRttFixture(text);
+		const session: RttSession = {
+			kind: "rtt",
+			hardware: false,
+			id: `ser-${this.#nextId++}`,
+			port: RTT_FIXTURE_PORT_ID,
+			lines: splitLines(text),
+			offset: 0,
+			pendingLines: [],
+			info: {
+				transport: "fixture",
+				chip: parsed.chip,
+				adapter: parsed.adapter,
+				controlBlock: null,
+				channels: parsed.channels,
+				openocd: null,
+				search: null,
+			},
+			usb: rttFixtureUsb(),
+		};
+		this.#sessions.set(session.id, session);
+		return { ok: true, value: this.#opened(session) };
+	}
+
+	async #openRttHardware(
+		port: string,
+		target: string | undefined,
+		rttSearch: string | undefined,
+	): Promise<SerialResult<OpenedSession>> {
+		const existing = [...this.#sessions.values()].find(
+			session => session.kind === "rtt" && session.hardware && session.port === port,
+		);
+		if (existing?.kind === "rtt") return { ok: true, value: this.#opened(existing) };
+		const attach = process.env.BENCHLOG_RTT_ATTACH?.trim() ?? "";
+		if (port === RTT_OPENOCD_PORT_ID && attach === "") {
+			return {
+				ok: false,
+				error: formatOpenOcdMissing(
+					`${RTT_OPENOCD_PORT_ID} attaches to an already running OpenOCD. Set BENCHLOG_RTT_ATTACH=host:port or telnet://host:port. To spawn OpenOCD, open rtt://stlink-0 instead.`,
+				),
+			};
+		}
+		const search = rttSearchFromEnv(rttSearch);
+		if (!search.ok) return search;
+		const channel = rttChannelFromEnv();
+		if (!channel.ok) return channel;
+		const opened = await openRttLink({
+			attach: attach === "" ? undefined : attach,
+			openocd: await resolveOpenOcd(),
+			target: rttTargetFromEnv(target),
+			interfaceCfg: rttInterfaceFromEnv(),
+			search: search.value,
+			channel: channel.value,
+		});
+		if (!opened.ok) return opened;
+		const usb = await this.#rttUsb(port);
+		const session: RttSession = {
+			kind: "rtt",
+			hardware: true,
+			id: `ser-${this.#nextId++}`,
+			port,
+			lines: [],
+			offset: 0,
+			pendingLines: [],
+			link: opened.link,
+			info: opened.link.info,
+			usb,
+		};
+		this.#sessions.set(session.id, session);
+		return { ok: true, value: this.#opened(session) };
+	}
+
+	async #readRtt(session: RttSession, maxLines: number): Promise<SerialResult<ReadChunk>> {
+		if (!session.hardware) {
+			const start = session.offset;
+			const slice = session.lines.slice(start, start + maxLines);
+			session.offset = start + slice.length;
+			return {
+				ok: true,
+				value: {
+					sessionId: session.id,
+					port: session.port,
+					backend: "rtt",
+					text: slice.join("\n"),
+					lineCount: slice.length,
+					offset: session.offset,
+					eof: session.offset >= session.lines.length,
+				},
+			};
+		}
+		const lines: string[] = [];
+		while (lines.length < maxLines && session.pendingLines.length > 0) {
+			const next = session.pendingLines.shift();
+			if (next !== undefined) lines.push(next);
+		}
+		if (lines.length < maxLines) {
+			if (!session.link) return { ok: false, error: "RTT session has no OpenOCD channel." };
+			try {
+				const more = await session.link.readLines(maxLines - lines.length, RTT_READ_TIMEOUT_MS);
+				lines.push(...more.lines);
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				return { ok: false, error: `RTT channel read failed: ${message}` };
+			}
+		}
+		session.offset += lines.length;
+		return {
+			ok: true,
+			value: {
+				sessionId: session.id,
+				port: session.port,
+				backend: "rtt",
+				text: lines.join("\n"),
+				lineCount: lines.length,
+				offset: session.offset,
+				eof: false,
+			},
+		};
+	}
+
+	#writeRtt(session: RttSession, data: string): SerialResult<WriteAck> | Promise<SerialResult<WriteAck>> {
+		if (!session.hardware) {
+			const echoed = data.endsWith("\n") ? data.slice(0, -1) : data;
+			session.lines.push(`[rtt] tx: ${echoed}`, "[rtt] rx: ack");
+			return {
+				ok: true,
+				value: {
+					sessionId: session.id,
+					port: session.port,
+					backend: "rtt",
+					bytes: Buffer.byteLength(data),
+					echoed,
+				},
+			};
+		}
+		return this.#writeRttHardware(session, data);
+	}
+
+	async #writeRttHardware(session: RttSession, data: string): Promise<SerialResult<WriteAck>> {
+		if (!session.link) return { ok: false, error: "RTT session has no OpenOCD channel." };
+		try {
+			const bytes = await session.link.write(data);
+			return {
+				ok: true,
+				value: {
+					sessionId: session.id,
+					port: session.port,
+					backend: "rtt",
+					bytes,
+				},
+			};
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			return { ok: false, error: `RTT channel write failed: ${message}` };
+		}
+	}
+
+	async #probeRttSession(session: RttSession): Promise<SerialResult<ProbeReport>> {
+		if (!session.hardware) return this.#rttFixtureReport(session);
+		if (session.link) {
+			try {
+				await session.link.refreshChannels();
+				session.info = session.link.info;
+				const sniffed = await session.link.readLines(20, RTT_PROBE_SNIFF_MS);
+				if (sniffed.lines.length > 0) session.pendingLines.push(...sniffed.lines);
+				return { ok: true, value: this.#rttHardwareReport(session, sniffed.raw, "buffered-for-serial-read") };
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				return { ok: false, error: `RTT probe failed: ${message}` };
+			}
+		}
+		return { ok: true, value: this.#rttHardwareReport(session, new Uint8Array(), "buffered-for-serial-read") };
+	}
+
+	async #probeRttPort(
+		port: string,
+		target: string | undefined,
+		rttSearch: string | undefined,
+	): Promise<SerialResult<ProbeReport>> {
+		if (isRttFixturePort(port)) {
+			const existing = [...this.#sessions.values()].find(session => session.kind === "rtt" && !session.hardware);
+			if (existing?.kind === "rtt") return this.#rttFixtureReport(existing);
+			return this.#rttFixtureReport(undefined);
+		}
+		const existing = [...this.#sessions.values()].find(
+			session => session.kind === "rtt" && session.hardware && session.port === port,
+		);
+		if (existing?.kind === "rtt") return this.#probeRttSession(existing);
+		const opened = await this.#openRttHardware(port, target, rttSearch);
+		if (!opened.ok) return opened;
+		const session = this.#sessions.get(opened.value.sessionId);
+		if (!session || session.kind !== "rtt") return { ok: false, error: "RTT probe lost the session it just opened." };
+		try {
+			const sniffed = session.link
+				? await session.link.readLines(20, RTT_PROBE_SNIFF_MS)
+				: { lines: [], raw: new Uint8Array() };
+			const report = this.#rttHardwareReport(session, sniffed.raw, "temporary-open-consumed");
+			report.sessionId = null;
+			report.notes = [
+				"The OpenOCD RTT session was opened only for this probe and then closed. Sniffed bytes were consumed.",
+			];
+			return { ok: true, value: report };
+		} finally {
+			session.link?.close();
+			this.#sessions.delete(session.id);
+		}
+	}
+
+	async #rttFixtureReport(session: RttSession | undefined): Promise<SerialResult<ProbeReport>> {
+		let text: string;
+		try {
+			text = session ? session.lines.join("\n") : await loadRttFixtureText(this.#rttFixtureText);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			return { ok: false, error: `RTT fixture log is unreadable: ${message}` };
+		}
+		const parsed = parseRttFixture(text);
+		const info: RttIdentity = session?.info ?? {
+			transport: "fixture",
+			chip: parsed.chip,
+			adapter: parsed.adapter,
+			controlBlock: null,
+			channels: parsed.channels,
+			openocd: null,
+			search: null,
+		};
+		const usb = rttFixtureUsb();
+		const sample = parseFixtureSample(text);
+		return {
+			ok: true,
+			value: {
+				backend: "rtt",
+				port: RTT_FIXTURE_PORT_ID,
+				sessionId: session?.id ?? null,
+				baud: null,
+				usb,
+				unknowns: rttUnknowns(info, usbUnknowns(usb, ["hostDevice"])),
+				baudHint: "RTT has no baud. This fixture was not measured on a host adapter.",
+				sniff: classifySniff(new TextEncoder().encode(text)),
+				sniffDisposition: "fixture-sample",
+				sample,
+				runtime: null,
+				rtt: info,
+				notes: ["Sample RTT metadata from the fixture capture. No OpenOCD process and no ST-LINK were opened."],
+			},
+		};
+	}
+
+	#rttHardwareReport(
+		session: RttSession,
+		raw: Uint8Array,
+		disposition: "buffered-for-serial-read" | "temporary-open-consumed",
+	): ProbeReport {
+		const info = session.info;
+		return {
+			backend: "rtt",
+			port: session.port,
+			sessionId: session.id,
+			baud: null,
+			usb: session.usb,
+			unknowns: rttUnknowns(info, usbUnknowns(session.usb)),
+			baudHint: "RTT has no baud. Bytes come from the OpenOCD RTT TCP channel.",
+			sniff: classifySniff(raw),
+			sniffDisposition: disposition,
+			sample: null,
+			runtime: null,
+			rtt: info,
+			notes:
+				disposition === "buffered-for-serial-read"
+					? ["Sniffed RTT bytes are queued for the next serial_read."]
+					: ["The OpenOCD RTT session was opened only for this probe and then closed."],
+		};
+	}
+
+	async #rttUsb(port: string): Promise<UsbIdentity> {
+		const match = /^rtt:\/\/stlink-(\d+)$/.exec(port);
+		if (!match?.[1]) return rttHardwareUsb(null);
+		try {
+			const adapters = await detectStlinkAdapters();
+			const adapter = adapters[Number(match[1])];
+			if (!adapter) return rttHardwareUsb(null);
+			return {
+				description: adapter.product,
+				manufacturer: "STMicroelectronics",
+				product: adapter.product,
+				vid: adapter.vid,
+				pid: adapter.pid,
+				serialNumber: adapter.serialNumber,
+				hwid: `${adapter.vid}:${adapter.pid}`,
+				location: adapter.location,
+				interface: "swd",
+			};
+		} catch {
+			return rttHardwareUsb(null);
+		}
 	}
 
 	async #loadFixtureText(): Promise<string> {
@@ -663,6 +1102,21 @@ export class SerialHub {
 				port: session.port,
 				backend: "fixture",
 				lineCount: session.lines.length,
+			};
+		}
+		if (session.kind === "rtt" && !session.hardware) {
+			return {
+				sessionId: session.id,
+				port: session.port,
+				backend: "rtt",
+				lineCount: session.lines.length,
+			};
+		}
+		if (session.kind === "rtt") {
+			return {
+				sessionId: session.id,
+				port: session.port,
+				backend: "rtt",
 			};
 		}
 		return {

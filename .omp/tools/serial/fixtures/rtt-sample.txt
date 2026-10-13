@@ -1,0 +1,13 @@
+[    0.000] BenchLog fixture RTT console
+[    0.004] board: benchlog-rtt-fixture
+[    0.008] chip: STM32F407VG (fixture)
+[    0.012] adapter: none
+[    0.016] transport: SEGGER RTT (fixture, no OpenOCD, no ST-LINK)
+[    0.020] rtt up 0: Terminal 1024 0
+[    0.021] rtt up 1: Logger 256 0
+[    0.022] rtt down 0: Terminal 16 0
+[    0.040] reset cause: power-on
+[    0.080] firmware image rtt-fixture-1
+[    0.120] channel 0 Terminal: boot log
+[    0.200] boot: ready
+rtt prompt>
