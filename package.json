@@ -18,6 +18,8 @@
 	},
 	"files": [
 		"bin/benchlog.js",
+		"bin/benchlog-brand.ts",
+		"bin/benchlog-startup.yml",
 		"benchlog-ext",
 		".omp/tools/serial",
 		"fixtures",

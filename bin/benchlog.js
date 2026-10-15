@@ -71,10 +71,26 @@ const HELP_TRAILER = `BenchLog
   --fixture
       Set BENCHLOG_SERIAL_FIXTURE=1 so serial_open defaults to fixture://firmware-boot.
       This flag is not forwarded to the oh-my-pi harness.
+  Startup
+      The interactive screen is BenchLog (板端串口观测与诊断 Agent) on the published
+      oh-my-pi harness. This session does not prompt to run omp update.
   Serial tools
       ./.omp/tools/serial when that directory exists in the working directory.
       Otherwise the installed copy is loaded with --extension <benchlog>/benchlog-ext.
 `;
+
+export function brandPreloadPath() {
+	return path.join(here, "benchlog-brand.ts");
+}
+
+export function startupConfigPath() {
+	return path.join(here, "benchlog-startup.yml");
+}
+
+/** Bun argv that runs the harness with the BenchLog face and without the omp update nag. */
+export function benchlogChildArgs(cliPath, launchArgs) {
+	return ["--preload", brandPreloadPath(), cliPath, "--config", startupConfigPath(), ...launchArgs];
+}
 
 function isDirectRun() {
 	const argv1 = process.argv[1];
@@ -100,9 +116,9 @@ export async function main(argv = process.argv.slice(2), cwd = process.cwd()) {
 		);
 		process.exit(1);
 	}
-	const env = { ...process.env };
+	const env = { ...process.env, BENCHLOG_BRAND: "1" };
 	if (launch.fixture) env.BENCHLOG_SERIAL_FIXTURE = "1";
-	const child = spawn(bunExecutable(), [cli, ...launch.args], {
+	const child = spawn(bunExecutable(), benchlogChildArgs(cli, launch.args), {
 		stdio: "inherit",
 		env,
 		cwd,

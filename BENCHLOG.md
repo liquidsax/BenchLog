@@ -31,6 +31,8 @@ npm install -g benchlog
 
 `benchlog` resolves `@oh-my-pi/pi-coding-agent`'s `src/cli.ts` and runs it with Bun. A global install may also link an `omp` bin from that dependency. Use `benchlog`: it applies `--fixture` and loads the serial tools. Plain `omp` is the harness without those BenchLog wrappers.
 
+The interactive session is that published harness. BenchLog does not fork it. `bin/benchlog-brand.ts` is a preload that replaces the omp startup mark, setup splash, and setup header for that process, and a config overlay turns `startup.checkUpdate` off so the screen does not say to run `omp update`. `LICENSE` and `THIRD-PARTY-NOTICES.txt` stay as upstream shipped them.
+
 ### Cut from the default install
 
 | Stack | Why it is absent |
