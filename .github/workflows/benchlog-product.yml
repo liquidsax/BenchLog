@@ -1,0 +1,30 @@
+name: BenchLog product
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  product:
+    name: Install, serial tools, size
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install BenchLog (not the oh-my-pi workspace)
+        run: bun install
+      - name: Host UART tests need pyserial
+        run: python3 -m pip install -r .omp/tools/serial/requirements.txt
+      - name: Serial tools and launcher
+        run: bun test .omp/tools/serial/serial.test.ts bin/benchlog.test.ts scripts/prune-heavy-optionals.test.ts
+      - name: CLI starts the harness
+        run: bun ./bin/benchlog.js --fixture --version
+      - name: Clean install is within 500 MiB
+        run: bun scripts/check-install-size.ts

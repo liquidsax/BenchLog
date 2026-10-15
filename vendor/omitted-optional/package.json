@@ -1,0 +1,7 @@
+{
+	"name": "benchlog-omitted-optional",
+	"version": "0.0.0",
+	"description": "BenchLog omits this optional dependency (local embeddings, speech, or ONNX).",
+	"license": "MIT",
+	"main": "index.js"
+}

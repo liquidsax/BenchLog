@@ -1,23 +1,72 @@
 # BenchLog
 
-**板端串口观测与诊断 Agent.** This repository is based on [oh-my-pi](https://github.com/can1357/oh-my-pi) (MIT). It is a trimmed, specialized agent for board-side UART and firmware-log diagnosis, built on that tree.
+**板端串口观测与诊断 Agent.** BenchLog is a product package on the published [oh-my-pi](https://github.com/can1357/oh-my-pi) harness (`@oh-my-pi/pi-coding-agent`). You install **this** package and run `benchlog`. A separate global `omp` install is not the product entrypoint.
 
 BenchLog is not a CozeBasedCLI continuation. Banned patterns: XML toolcall, fake SQLite audit, non-resumable sessions, Coze lock-in.
 
-Upstream relationship, remotes, the modules this import keeps, and the UART fixture tools are in [BENCHLOG.md](./BENCHLOG.md). `LICENSE` and `THIRD-PARTY-NOTICES.txt` stay as upstream shipped them.
+Upstream relationship, what was cut from the default install, and the serial tools are in [BENCHLOG.md](./BENCHLOG.md). `LICENSE` and `THIRD-PARTY-NOTICES.txt` stay as upstream shipped them.
 
-Fixture demo, no board:
+## Install
+
+Requires [Bun](https://bun.sh) `>= 1.3.14`. The harness entry is TypeScript.
+
+From a clone of this repository (`bun install` here does **not** install the mirrored `packages/*` workspace):
+
+```sh
+bun install
+bun run benchlog
+```
+
+From the registry:
+
+```sh
+bun install -g benchlog
+# or
+npm install -g benchlog
+benchlog
+```
+
+`bun add benchlog` and `npm install benchlog` install the same package into a project. `benchlog --version` prints the BenchLog version, then the underlying oh-my-pi version.
+
+`benchlog --fixture` sets `BENCHLOG_SERIAL_FIXTURE=1` before the session starts, so `serial_open` with no port uses `fixtures/firmware-boot.txt`. That flag is BenchLog's. It is not forwarded to `omp`.
+
+### What you do not install
+
+Installing `@oh-my-pi/pi-coding-agent` globally gives you `omp` and, by default, optional Hugging Face / sherpa stacks this product does not use. Installing the mirrored oh-my-pi workspace (`package.omp-workspace.json`) pulls local embeddings, speech, browser UI, and the rest of the monorepo and lands around 1–2GB.
+
+BenchLog depends on published `@oh-my-pi/pi-coding-agent@18.10.1` only. Root `overrides` replace `@huggingface/transformers`, `sherpa-onnx*`, `onnxruntime-*`, `fastembed`, and the omp-stats dashboard packages `lucide-react` / `react` / `react-dom` with an empty stub so a clone install does not download them. `postinstall` deletes those real trees if a parent `npm install` ignored the overrides (npm applies `overrides` only at the project root). It will not remove a package the top-level project, or an unrelated installed package, already depends on. `@oh-my-pi/pi-natives` stays: the host platform leaf is required, and the linux x64 leaf ships both baseline and modern builds because the loader picks one at runtime. `puppeteer-core` and `axe-core` stay because the published harness lists them as dependencies; serial diagnosis does not use the browser tool. OpenTelemetry exporter packages stay; they are small next to the native leaf.
+
+Target: `node_modules` ≤ 500 MiB on linux x64 after a clean product install.
+
+```sh
+bun scripts/check-install-size.ts
+```
+
+The script measures the machine it runs on. Other OS/CPU combinations install a different `pi-natives` leaf, so the byte count changes. `--self` measures the current checkout instead of a temp install.
+
+### Models and NVIDIA NIM
+
+Providers are omp's. For NVIDIA NIM, set `NVIDIA_API_KEY` (an NGC personal key). The `nvidia` provider uses `https://integrate.api.nvidia.com/v1`. Other keys are listed in [docs/providers.md](./docs/providers.md).
+
+### Serial tools
+
+`benchlog` loads `.omp/tools/serial` (`serial_list`, `serial_open`, `serial_read`, `serial_write`, `serial_probe`).
+
+- If the working directory contains `.omp/tools/serial/index.ts`, that copy is used. A clone of this repo does.
+- Otherwise the CLI passes `--extension` at the installed `benchlog-ext/` directory, which re-exports the same module. Fixture files stay beside that module.
+
+Host UART needs Python 3 and pyserial (`python3 -m pip install -r .omp/tools/serial/requirements.txt`). Hardware RTT needs OpenOCD and an ST-LINK. A ST-LINK with no virtual COM port is not a UART.
+
+Fixture demo, no board and no model:
 
 ```sh
 bun scripts/benchlog-serial-demo.ts --fixture
 bun scripts/benchlog-serial-demo.ts --rtt
 ```
 
-`omp --fixture` (or `BENCHLOG_SERIAL_FIXTURE=1`) makes `serial_open` use `fixtures/firmware-boot.txt`. `bun scripts/benchlog-serial-demo.ts --rtt` reads `fixture://rtt-sample` with no board and no OpenOCD. `serial_list` and `serial_read` are read-tier. `serial_open` is read-tier for a fixture or host UART, and exec-tier for `rtt://` (it connects OpenOCD). `serial_write` is exec-tier. `serial_probe` is read-tier for either fixture and exec-tier for a host UART or `rtt://`.
+`serial_list` and `serial_read` are read-tier. `serial_open` is read-tier for a fixture or host UART, and exec-tier for `rtt://`. `serial_write` is exec-tier. `serial_probe` is read-tier for either fixture and exec-tier for a host UART or `rtt://`.
 
-Host UART needs Python 3 and pyserial (`python3 -m pip install -r .omp/tools/serial/requirements.txt`). Hardware RTT needs OpenOCD (`apt`, `dnf`, `pacman`, or `brew install openocd`) and an ST-LINK; a ST-LINK with no virtual COM port is not a UART. See [BENCHLOG.md](./BENCHLOG.md).
-
-The rest of this file is the upstream oh-my-pi README, kept intact.
+The rest of this file is the upstream oh-my-pi README, kept as harness reference. Its installers are not how you install BenchLog.
 
 ---
 
@@ -56,6 +105,8 @@ The most capable agent surface that ships. Continuously tuned by real-world use 
 > vouch system may return.
 
 ## Install
+
+> **BenchLog:** use the install at the top of this file (`bun install` in this repo, or `bun`/`npm install` of the `benchlog` package) and run `benchlog`. The commands below install upstream `omp`, which is the harness, not the BenchLog product entrypoint.
 
 **macOS · Linux**
 
