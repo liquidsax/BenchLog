@@ -1,0 +1,6 @@
+# BenchLog pins @oh-my-pi/pi-coding-agent. The harness startup check compares that
+# pin to the latest omp release and tells the user to run `omp update`. This
+# package updates with a BenchLog release, so the interactive session does not
+# show that prompt. A later --config file can still turn the check back on.
+startup:
+  checkUpdate: false

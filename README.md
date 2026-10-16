@@ -34,6 +34,8 @@ benchlog
 
 `benchlog --fixture` sets `BENCHLOG_SERIAL_FIXTURE=1` before the session starts, so `serial_open` with no port uses `fixtures/firmware-boot.txt`. That flag stays on the BenchLog CLI and is not forwarded to the harness.
 
+The interactive startup screen says BenchLog, not the oh-my-pi logo. The session still runs on that harness and does not prompt to run `omp update`.
+
 ### What you do not install
 
 A global install of `@oh-my-pi/pi-coding-agent` is the harness by itself. It does not apply BenchLog's serial-tool wrapper, and by default it pulls optional Hugging Face / sherpa stacks this product does not use. Installing the mirrored workspace (`package.omp-workspace.json`) pulls local embeddings, speech, browser UI, and the rest of the monorepo and lands around 1–2GB.
